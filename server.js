@@ -3,28 +3,24 @@ const mysql = require("mysql");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const cron = require("node-cron");
+const path = require('path');
+require('dotenv').config();
 
 const app = express();
-const IP_ADDRESS = "localhost";
+const IP_ADDRESS = process.env.IP_ADDRESS;
 const port = 5000;
 
 // Middleware
 app.use(bodyParser.json());
 app.use(cors());
 
-console.log(process.env.HOST);
-console.log(process.env.PORT);
-console.log(process.env.USER);
-console.log(process.env.PASSWORD);
-console.log(process.env.DATABASE);
-
 // Database configuration
 const connection = mysql.createConnection({
-  host: "isef01-quiz.cxcheuy8ztxa.eu-north-1.rds.amazonaws.com",
-  port: "3306",
-  user: "admin",
-  password: "#quizisef01",
-  database: "quizapp",
+  host: process.env.HOSTDB,
+  port: process.env.PORTDB,
+  user: process.env.USER,
+  password: process.env.PASSWORD,
+  database: process.env.DATABASE,
 });
 
 // Connect to the database
@@ -47,28 +43,67 @@ app.post("/getThreeQuestionsByCat", getThreeQuestionsByCategory);
 app.post("/createQuizInDB2", createQuizInDB);
 app.post("/createNewRound", createNewRound);
 app.post("/postComment", postComment);
-app.post("/addQuestion", addQuestion);
 app.post("/getNumberofMessages", getNumberofMessages);
 app.post("/resetTrustIndex", resetTrustIndex);
 app.post("/incrementTrustIndex", incrementTrustIndex);
 app.post("/getQuestionsWithoutUser", getQuestionsWithoutUser);
 app.post("/updateUserForQuestion", updateUserForQuestion);
+app.post("/data", getData);
 app.get("/categories", getCategories);
 app.post("/question", addQuestion);
-app.get("/data", getData);
-app.put("/updateQuestion", updateQuestion)
-
+app.post("/getQuestionsForEdit", getQuestionsForEdit);
+app.post("/getComments", getComments);
+app.post("/updateQuestion", updateQuestion)
+app.post("/deleteComment", deleteComment)
 
 // Route Handlers
+function deleteComment(req, res){
+  const { commentID } = req.body;
+  const query = `DELETE FROM Comment WHERE CommentID= ?`;
+  connection.query(query, [commentID ], handleQueryResponse(res));
+}
 
 function updateQuestion(req, res) {
-  const query = 'UPDATE Question SET Answer1 = 0 WHERE QuestionID = 9;'
-  console.log(req.body)
+  const { QuestionText, Answer1, Answer2, Answer3, CorrectAnswer, QuestionID } = req.body.question;
+  const query = `UPDATE Question 
+  SET QuestionText = ?, Answer1 = ?, Answer2 = ?, Answer3 = ?, CorrectAnswer = ?
+  WHERE QuestionID = ?`;
+  connection.query(query, [QuestionText, Answer1, Answer2, Answer3, CorrectAnswer, QuestionID ], handleQueryResponse(res));
 }
 
 
 function getCategories(req, res) {
   connection.query('SELECT * FROM QuestionCategory', handleQueryResponse(res));
+}
+
+function getQuestionsForEdit(req, res) {
+  const { userID } = req.body;
+  let query =
+      `SELECT q.QuestionID, q.QuestionText, q.Answer1, q.Answer2, q.Answer3, q.CorrectAnswer, q.CategoryID, c.CommentID, c.Text, c.CommentTimeStamp
+      FROM Question q
+      LEFT JOIN Comment c ON c.QuestionID = q.QuestionID 
+      WHERE q.UserID = ?
+      GROUP BY q.QuestionID, q.QuestionText, c.CommentID`
+  connection.query(query, [userID], handleQueryResponse(res));
+}
+
+function getComments(req, res) {
+  let query = `SELECT * FROM Comment`;
+  connection.query(query, handleQueryResponse(res));
+}
+
+
+function addQuestion(req, res) {
+  const answer1 = req.body.data["Answer1"]
+  const answer2 = req.body.data["Answer2"]
+  const answer3 = req.body.data["Answer3"]
+  const correctAnswer = req.body.data["CorrectAnswer"]
+  const questionText = req.body.data["QuestionText"]
+  const selectedCategory = req.body.data["Category"]
+  const userID = req.body.data["UserID"]
+
+  const query = `INSERT INTO Question(QuestionText, Answer1, Answer2, Answer3, CorrectAnswer, CategoryID, UserID ) VALUES ('${questionText}', '${answer1}', '${answer2}', '${answer3}', '${correctAnswer}', ${selectedCategory}, ${userID});`;
+  connection.query(query, handleQueryResponse(res));
 }
 
 function getData(req, res) {
@@ -79,14 +114,6 @@ function getData(req, res) {
   connection.query(query, handleQueryResponse(res));
 }
 
-
-function addQuestion(req, res) {
-  const { question, answerA, answerB, answerC, correctAnswer, selectedCategory } = req.body.data;
-  const query = `INSERT INTO Question(QuestionText, Answer1, Answer2, Answer3, CorrectAnswer, CategoryID) VALUES ('${question}', '${answerA}', '${answerB}', '${answerC}', '${correctAnswer}', ${selectedCategory});`;
-  console.log(query)
-  //connection.query(query, handleQueryResponse(res));
-}
-
 function getGameData(req, res) {
   const { accessToken } = req.body;
   const query = `SELECT * FROM Quiz 
@@ -95,12 +122,6 @@ function getGameData(req, res) {
                  LEFT JOIN QuestionCategory ON Question.CategoryID = QuestionCategory.QuestionCategoryID
                  WHERE Quiz.AccessTokenOne = ? OR Quiz.AccessTokenTwo = ?`;
   connection.query(query, [accessToken, accessToken], handleQueryResponse(res));
-}
-
-function addQuestion(req, res) {
-  const { questionText, answerA, answerB, answerC, answerD, category } = req.body;
-  const query = `INSERT INTO Question (QuestionText, Answer1, Answer2, Answer3, CorrectAnswer, CategoryID) VALUES (?, ?, ?, ?, ?, ?)`;
-  connection.query(query, [questionText, answerA, , answerB, answerC, answerD, category], handleQueryResponse(res));
 }
 
 function getQuestionsWithoutUser(req, res) {
@@ -163,7 +184,7 @@ function getQuestionsWithoutReaction(req, res) {
       SELECT DISTINCT q.QuestionID
       FROM Question q
       JOIN Comment c ON q.QuestionID = c.QuestionID
-      WHERE c.CommentTimeStamp < DATE_SUB(NOW(), INTERVAL 2 WEEK)
+      WHERE c.CommentTimeStamp < DATE_SUB(NOW(), INTERVAL 3 WEEK)
       AND c.CategoryID IN (1, 2)
   ) AS subquery ON q.QuestionID = subquery.QuestionID
   SET q.UserID = NULL;`;
@@ -385,13 +406,21 @@ function handleRollbackAndError(res, connection, errorMessage, err) {
   });
 }
 
-//clean up Code executed once a day by server at midnight
-cron.schedule("0 0 * * *", () => {
-  getQuestionsWithoutReaction();
+//takes away questions of an user if he doesnt react to a comment after 3 weeks //deactivated for prototyp usage
+// cron.schedule("0 0 * * *", () => {
+//   getQuestionsWithoutReaction();
+// });
+
+// Serve static files from the 'build' directory
+app.use(express.static(path.join(__dirname, 'build')));
+
+// Always return the main index.html, so react-router render the route in the client
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
 // Start the server
-const PORT = process.env.PORT || port;
-app.listen(PORT, IP_ADDRESS, () => {
-  console.log(`Server listening on ${IP_ADDRESS}:${PORT}`);
+const PORT = process.env.PORTS || port;
+app.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
 });
